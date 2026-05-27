@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Native GLB Web Viewer with AR & Animation</title>
+    
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #1a1a1a;
+            color: #fff;
+            overflow: hidden;
+        }
+        /* Dropzone & Viewer Layout */
+        #drop-zone {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+        model-viewer {
+            width: 100%;
+            height: 100%;
+            background-color: #242424;
+            display: none; /* Hidden until a file is loaded */
+        }
+        /* UI Control Panel Overlay */
+        .controls-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            padding: 12px 24px;
+            border-radius: 30px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 10;
+            flex-wrap: wrap;
+            justify-content: center;
+            max-width: 90%;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+        input[type="checkbox"], input[type="file"], select {
+            cursor: pointer;
+        }
+        select {
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            padding: 4px 8px;
+            border-radius: 4px;
+            outline: none;
+        }
+        .btn-upload {
+            background: #007aff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-upload:hover {
+            background: #0056b3;
+        }
+        /* Styling for the custom AR Button slot */
+        #custom-ar-button {
+            background-color: #34c759;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-weight: bold;
+            cursor: pointer;
+            display: none; /* Hidden on desktop, handled by model-viewer conditionally */
+        }
+        #custom-ar-button:hover {
+            background-color: #28a745;
+        }
+        /* Hidden by default, shown only when GLB has animations */
+        .animation-controls {
+            display: none; 
+            gap: 20px;
+            align-items: center;
+            border-left: 1px solid rgba(255, 255, 255, 0.2);
+            padding-left: 20px;
+        }
+        /* Initial Instructions Overlay */
+        #placeholder-text {
+            text-align: center;
+            pointer-events: none;
+            position: absolute;
+            color: #aaa;
+        }
+        #placeholder-text h2 { color: #fff; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+
+    <div id="drop-zone">
+        <div id="placeholder-text">
+            <h2>3D GLB Viewer + AR Support</h2>
+            <p>Drag & Drop a .glb file here, or click Load GLB</p>
+        </div>
+
+        <model-viewer 
+            id="viewer" 
+            camera-controls 
+            touch-action="pan-y" 
+            shadow-intensity="1" 
+            exposure="1" 
+            environment-image="neutral"
+            ar
+            ar-modes="webxr scene-viewer quick-look"
+            ar-scale="auto">
+            
+            <button slot="ar-button" id="custom-ar-button">
+                📱 View in AR Space
+            </button>
+        </model-viewer>
+
+        <div class="controls-panel">
+            <button class="btn-upload" onclick="document.getElementById('file-input').click()">Load GLB</button>
+            <input type="file" id="file-input" accept=".glb" style="display:none;">
+
+            <div class="control-group">
+                <input type="checkbox" id="turntable-toggle">
+                <label for="turntable-toggle">Turntable</label>
+            </div>
+            
+            <div class="control-group">
+                <input type="checkbox" id="shadow-toggle" checked>
+                <label for="shadow-toggle">Shadows</label>
+            </div>
+
+            <div id="animation-section" class="animation-controls">
+                <div class="control-group">
+                    <input type="checkbox" id="anim-play-toggle" checked>
+                    <label for="anim-play-toggle">Play</label>
+                </div>
+                <div class="control-group">
+                    <label for="anim-selector">Clip:</label>
+                    <select id="anim-selector"></select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const viewer = document.getElementById('viewer');
+        const placeholderText = document.getElementById('placeholder-text');
+        
+        // UI Controls
+        const turntableToggle = document.getElementById('turntable-toggle');
+        const shadowToggle = document.getElementById('shadow-toggle');
+        const animationSection = document.getElementById('animation-section');
+        const animPlayToggle = document.getElementById('anim-play-toggle');
+        const animSelector = document.getElementById('anim-selector');
+
+        // Handle local file selection / loading
+        function loadModel(file) {
+            if (file && file.name.endsWith('.glb')) {
+                const objectURL = URL.createObjectURL(file);
+                
+                // Reset animation UI state before loading new file
+                animationSection.style.display = 'none';
+                animSelector.innerHTML = '';
+                animPlayToggle.checked = true;
+
+                viewer.src = objectURL;
+                viewer.style.display = 'block';
+                placeholderText.style.display = 'none';
+            } else {
+                alert("Please drop or select a valid file ending in .glb");
+            }
+        }
+
+        // Listen for when the 3D model is fully loaded to fetch animation tracks
+        viewer.addEventListener('load', () => {
+            const availableAnimations = viewer.availableAnimations;
+            
+            if (availableAnimations && availableAnimations.length > 0) {
+                availableAnimations.forEach((animName) => {
+                    const option = document.createElement('option');
+                    option.value = animName;
+                    option.textContent = animName;
+                    animSelector.appendChild(option);
+                });
+
+                viewer.animationName = availableAnimations[0];
+                viewer.play();
+                animationSection.style.display = 'flex';
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => loadModel(e.target.files[0]));
+
+        // Drag & Drop event handling
+        dropZone.addEventListener('dragover', (e) => e.preventDefault());
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            if (e.dataTransfer.files.length > 0) {
+                loadModel(e.dataTransfer.files[0]);
+            }
+        });
+
+        // --- Core Functionality Toggles ---
+        
+        // 1. Turntable Feature
+        turntableToggle.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                viewer.setAttribute('auto-rotate', '');
+                viewer.setAttribute('rotation-per-second', '30deg');
+            } else {
+                viewer.removeAttribute('auto-rotate');
+            }
+        });
+
+        // 2. Shadows Feature
+        shadowToggle.addEventListener('change', (e) => {
+            viewer.setAttribute('shadow-intensity', e.target.checked ? "1" : "0");
+        });
+
+        // 3. Play / Pause Animation
+        animPlayToggle.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                viewer.play();
+            } else {
+                viewer.pause();
+            }
+        });
+
+        // 4. Switch Active Animation Clip
+        animSelector.addEventListener('change', (e) => {
+            viewer.animationName = e.target.value;
+            if (animPlayToggle.checked) {
+                viewer.play();
+            }
+        });
+    </script>
+</body>
+</html>
