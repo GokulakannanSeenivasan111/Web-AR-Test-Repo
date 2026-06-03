@@ -1,267 +1,610 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Native GLB Web Viewer with AR & Animation</title>
-    
-    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Studio 3D — Streaming Viewer</title>
 
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-        body, html {
-            width: 100%;
-            height: 100%;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: #1a1a1a;
-            color: #fff;
-            overflow: hidden;
-        }
-        /* Dropzone & Viewer Layout */
-        #drop-zone {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-        }
-        model-viewer {
-            width: 100%;
-            height: 100%;
-            background-color: #242424;
-            display: none; /* Hidden until a file is loaded */
-        }
-        /* UI Control Panel Overlay */
-        .controls-panel {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.85);
-            padding: 12px 24px;
-            border-radius: 30px;
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            z-index: 10;
-            flex-wrap: wrap;
-            justify-content: center;
-            max-width: 90%;
-        }
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14px;
-            white-space: nowrap;
-        }
-        input[type="checkbox"], input[type="file"], select {
-            cursor: pointer;
-        }
-        select {
-            background: #333;
-            color: white;
-            border: 1px solid #555;
-            padding: 4px 8px;
-            border-radius: 4px;
-            outline: none;
-        }
-        .btn-upload {
-            background: #007aff;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .btn-upload:hover {
-            background: #0056b3;
-        }
-        /* Styling for the custom AR Button slot */
-        #custom-ar-button {
-            background-color: #34c759;
-            color: white;
-            border: none;
-            border-radius: 20px;
-            padding: 8px 16px;
-            font-weight: bold;
-            cursor: pointer;
-            display: none; /* Hidden on desktop, handled by model-viewer conditionally */
-        }
-        #custom-ar-button:hover {
-            background-color: #28a745;
-        }
-        /* Hidden by default, shown only when GLB has animations */
-        .animation-controls {
-            display: none; 
-            gap: 20px;
-            align-items: center;
-            border-left: 1px solid rgba(255, 255, 255, 0.2);
-            padding-left: 20px;
-        }
-        /* Initial Instructions Overlay */
-        #placeholder-text {
-            text-align: center;
-            pointer-events: none;
-            position: absolute;
-            color: #aaa;
-        }
-        #placeholder-text h2 { color: #fff; margin-bottom: 8px; }
-    </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module"
+    src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js">
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap"
+    media="print" onload="this.media='all'" />
+
+  <style>
+/* ── Tokens ─────────────────────────────────────────────────────────── */
+:root{
+  --bg:#09090b; --surface:rgba(14,14,18,0.78); --border:rgba(255,255,255,0.07);
+  --border-hi:rgba(255,255,255,0.18); --white:#fff; --muted:rgba(255,255,255,0.42);
+  --accent:#6366f1; --glow:rgba(99,102,241,0.3);
+  --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --bar2:#818cf8;
+  --ui:'DM Sans',system-ui,sans-serif; --mono:'DM Mono','Fira Code',monospace;
+  --blur:blur(22px) saturate(160%);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;background:var(--bg);color:var(--white);
+  font-family:var(--ui);overflow:hidden;-webkit-font-smoothing:antialiased}
+
+/* ── Stage ──────────────────────────────────────────────────────────── */
+#stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+model-viewer{width:100%;height:100%;opacity:0;transition:opacity .8s cubic-bezier(.4,0,.2,1);--poster-color:transparent}
+model-viewer.vis{opacity:1}
+
+/* ── Loader ─────────────────────────────────────────────────────────── */
+#loader{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:24px;background:var(--bg);
+  transition:opacity .55s ease,visibility .55s ease}
+#loader.gone{opacity:0;visibility:hidden;pointer-events:none}
+
+.ld-logo{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:600;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.ld-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);
+  box-shadow:0 0 10px var(--glow);animation:pdot 1.8s ease-in-out infinite}
+@keyframes pdot{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.5);opacity:.55}}
+
+#ld-title{font-size:clamp(20px,4.5vw,30px);font-weight:700;letter-spacing:-.03em}
+#ld-title span{color:var(--accent)}
+#ld-sub{font-size:12px;color:var(--muted);letter-spacing:.01em;text-align:center;padding:0 20px;max-width:320px}
+#ld-phase{font-size:11px;font-family:var(--mono);color:rgba(255,255,255,.22);min-height:16px}
+
+/* Progress */
+#prog-panel{width:min(320px,86vw);display:flex;flex-direction:column;gap:9px;
+  max-height:48vh;overflow-y:auto;padding:2px 4px;
+  scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent}
+.a-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px}
+.a-name{font-size:10.5px;font-family:var(--mono);color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .3s}
+.a-name.ok{color:var(--green)}
+.a-size{font-size:10px;font-family:var(--mono);color:rgba(255,255,255,.22);
+  text-align:right;white-space:nowrap;min-width:68px}
+.bar-t{grid-column:1/-1;height:2px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden}
+.bar-f{height:100%;width:0%;border-radius:99px;transition:width .22s ease}
+.bar-f.pri{background:linear-gradient(90deg,var(--accent),var(--bar2));box-shadow:0 0 5px var(--glow)}
+.bar-f.sec{background:rgba(255,255,255,.18)}
+#spd{font-size:10px;font-family:var(--mono);color:rgba(255,255,255,.18)}
+
+/* ── HUD top ────────────────────────────────────────────────────────── */
+#hud{position:fixed;top:16px;left:16px;right:16px;display:flex;
+  justify-content:space-between;align-items:center;z-index:20;pointer-events:none}
+.pill{background:var(--surface);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--border);border-radius:999px;padding:7px 13px;
+  display:flex;align-items:center;gap:8px;pointer-events:auto;
+  font-size:11.5px;font-weight:500;color:var(--muted);transition:border-color .2s}
+.pill:hover{border-color:var(--border-hi)}
+.s-dot{width:6px;height:6px;border-radius:50%;background:var(--amber);
+  box-shadow:0 0 0 2px rgba(245,158,11,.2);transition:background .4s,box-shadow .4s;flex-shrink:0}
+.s-dot.ok{background:var(--green);box-shadow:0 0 0 2px rgba(34,197,94,.2)}
+.s-dot.err{background:var(--red);box-shadow:0 0 0 2px rgba(239,68,68,.2)}
+#mem-pill{display:none}
+#mb-t{width:44px;height:3px;background:rgba(255,255,255,.1);border-radius:99px;overflow:hidden}
+#mb-f{height:100%;width:0%;background:var(--green);border-radius:99px;transition:width .5s,background .5s}
+
+/* ── Toolbar ────────────────────────────────────────────────────────── */
+#bar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  background:var(--surface);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--border);border-radius:999px;padding:5px;
+  display:flex;align-items:center;gap:3px;z-index:20;
+  max-width:calc(100vw - 28px);
+  box-shadow:0 8px 28px rgba(0,0,0,.55),0 0 0 .5px rgba(255,255,255,.04) inset}
+.tb{display:flex;align-items:center;gap:5px;padding:8px 12px;border-radius:99px;
+  font-size:12px;font-weight:500;color:var(--muted);white-space:nowrap;
+  cursor:pointer;user-select:none;transition:color .18s,background .18s;
+  border:none;background:none;font-family:var(--ui);letter-spacing:-.01em}
+.tb:hover{color:var(--white);background:rgba(255,255,255,.06)}
+.tb.on{color:var(--white);background:rgba(255,255,255,.1)}
+.tb.on .ic{color:var(--accent)}
+.ic{font-size:13px;line-height:1;transition:color .18s}
+.sep{width:1px;height:16px;background:rgba(255,255,255,.1);margin:0 2px;flex-shrink:0}
+#anim-dock{display:none;align-items:center;gap:3px}
+#cw{position:relative;display:flex;align-items:center}
+#cp{appearance:none;-webkit-appearance:none;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.1);border-radius:99px;color:var(--white);
+  font-size:11px;font-weight:500;font-family:var(--ui);padding:6px 26px 6px 11px;
+  outline:none;cursor:pointer;max-width:140px;transition:border-color .2s}
+#cp:hover{border-color:rgba(255,255,255,.25)}
+#cp option{background:#18181b;color:#fff}
+.cc{position:absolute;right:9px;font-size:9px;color:var(--muted);pointer-events:none}
+
+/* ── AR button ──────────────────────────────────────────────────────── */
+#ar-btn{position:absolute;bottom:84px;left:50%;transform:translateX(-50%);
+  background:var(--white);color:#000;font-weight:700;font-size:12px;
+  font-family:var(--ui);letter-spacing:-.01em;padding:10px 20px;
+  border-radius:999px;border:none;cursor:pointer;z-index:10;
+  box-shadow:0 4px 18px rgba(0,0,0,.4);display:flex;align-items:center;gap:6px;
+  transition:background .15s,transform .15s}
+#ar-btn:hover{background:rgba(255,255,255,.92);transform:translateX(-50%) translateY(-1px)}
+
+/* ── Hotspots ───────────────────────────────────────────────────────── */
+.hs{display:flex;align-items:center;gap:7px;background:var(--surface);
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--border);border-radius:999px;padding:5px 11px 5px 6px;
+  color:var(--white);font-size:11px;font-weight:500;font-family:var(--ui);
+  cursor:pointer;white-space:nowrap;pointer-events:auto;
+  transform:translateX(-50%);box-shadow:0 4px 18px rgba(0,0,0,.45);
+  user-select:none;transition:border-color .2s,background .2s}
+.hs:hover{border-color:var(--border-hi);background:rgba(18,18,22,.88)}
+.hs.on{border-color:rgba(99,102,241,.5)}
+.hs-r{width:21px;height:21px;border-radius:50%;border:1.5px solid rgba(255,255,255,.28);
+  display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;
+  position:relative;background:rgba(255,255,255,.07);transition:border-color .2s,background .2s}
+.hs.on .hs-r{border-color:var(--accent);background:rgba(99,102,241,.18);box-shadow:0 0 7px var(--glow)}
+.hs:not(.on) .hs-r::after{content:'';position:absolute;inset:-3px;border-radius:50%;
+  border:1.5px solid rgba(255,255,255,.28);animation:hsp 2.2s ease-out infinite}
+@keyframes hsp{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.5);opacity:0}}
+
+@media(max-width:480px){
+  .tb{padding:7px 9px;font-size:11px}
+  .tb-lbl{display:none}
+  #cp{max-width:100px}
+}
+  </style>
 </head>
 <body>
 
-    <div id="drop-zone">
-        <div id="placeholder-text">
-            <h2>3D GLB Viewer + AR Support</h2>
-            <p>Drag & Drop a .glb file here, or click Load GLB</p>
-        </div>
+<!-- LOADER -->
+<div id="loader">
+  <div class="ld-logo"><div class="ld-dot"></div>Studio 3D</div>
+  <div id="ld-title">Loading <span>Scene</span></div>
+  <div id="ld-sub">Streaming assets one at a time to save memory…</div>
+  <div id="prog-panel"></div>
+  <div id="spd"></div>
+  <div id="ld-phase"></div>
+</div>
 
-        <model-viewer 
-            id="viewer" 
-            camera-controls 
-            touch-action="pan-y" 
-            shadow-intensity="1" 
-            exposure="1" 
-            environment-image="neutral"
-            ar
-            ar-modes="webxr scene-viewer quick-look"
-            ar-scale="auto">
-            
-            <button slot="ar-button" id="custom-ar-button">
-                📱 View in AR Space
-            </button>
-        </model-viewer>
+<!-- STAGE -->
+<div id="stage">
+  <model-viewer id="mv"
+    camera-controls touch-action="pan-y"
+    shadow-intensity="0" shadow-softness="0"
+    exposure="1.05" environment-image="neutral"
+    interpolation-decay="50" interaction-prompt="none"
+    min-camera-orbit="auto 2deg auto"
+    max-camera-orbit="auto 90deg auto"
+    ar ar-modes="webxr quick-look"
+    ar-scale="auto" ar-placement="floor">
+    <button slot="ar-button" id="ar-btn">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+      </svg>
+      View in Space
+    </button>
+  </model-viewer>
+</div>
 
-        <div class="controls-panel">
-            <button class="btn-upload" onclick="document.getElementById('file-input').click()">Load GLB</button>
-            <input type="file" id="file-input" accept=".glb" style="display:none;">
+<!-- HUD -->
+<div id="hud">
+  <div class="pill">
+    <div id="s-dot" class="s-dot"></div>
+    <span id="s-txt">Connecting…</span>
+  </div>
+  <div class="pill" id="mem-pill">
+    <span style="font-size:10px">RAM</span>
+    <div id="mb-t"><div id="mb-f"></div></div>
+    <span id="mb-pct" style="font-size:10px">—</span>
+  </div>
+</div>
 
-            <div class="control-group">
-                <input type="checkbox" id="turntable-toggle">
-                <label for="turntable-toggle">Turntable</label>
-            </div>
-            
-            <div class="control-group">
-                <input type="checkbox" id="shadow-toggle" checked>
-                <label for="shadow-toggle">Shadows</label>
-            </div>
+<!-- TOOLBAR -->
+<div id="bar">
+  <button class="tb" id="b-rot">   <span class="ic">⟳</span><span class="tb-lbl">Rotate</span></button>
+  <button class="tb on" id="b-sh"> <span class="ic">◐</span><span class="tb-lbl">Shadows</span></button>
+  <button class="tb" id="b-env">   <span class="ic">◑</span><span class="tb-lbl">Env</span></button>
+  <div class="sep"></div>
+  <div id="anim-dock">
+    <button class="tb on" id="b-play"><span class="ic" id="pi">▶</span><span class="tb-lbl">Play</span></button>
+    <div id="cw"><select id="cp"></select><span class="cc">▾</span></div>
+    <div class="sep"></div>
+  </div>
+  <button class="tb" id="b-apl"><span class="ic">⬛</span><span class="tb-lbl">Floor</span></button>
+  <button class="tb" id="b-asc"><span class="ic">⤢</span><span class="tb-lbl">Scale</span></button>
+</div>
 
-            <div id="animation-section" class="animation-controls">
-                <div class="control-group">
-                    <input type="checkbox" id="anim-play-toggle" checked>
-                    <label for="anim-play-toggle">Play</label>
-                </div>
-                <div class="control-group">
-                    <label for="anim-selector">Clip:</label>
-                    <select id="anim-selector"></select>
-                </div>
-            </div>
-        </div>
-    </div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader }   from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader }  from 'three/addons/loaders/DRACOLoader.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
-    <script>
-        const dropZone = document.getElementById('drop-zone');
-        const fileInput = document.getElementById('file-input');
-        const viewer = document.getElementById('viewer');
-        const placeholderText = document.getElementById('placeholder-text');
-        
-        // UI Controls
-        const turntableToggle = document.getElementById('turntable-toggle');
-        const shadowToggle = document.getElementById('shadow-toggle');
-        const animationSection = document.getElementById('animation-section');
-        const animPlayToggle = document.getElementById('anim-play-toggle');
-        const animSelector = document.getElementById('anim-selector');
+/* ══════════════════════════════════════════════════════════════════
+   CONFIG
+══════════════════════════════════════════════════════════════════ */
+const BASE = 'https://raw.githubusercontent.com/GokulakannanSeenivasan111/Test-Web-AR-GLB-Viewer/main';
+const ASSETS = [
+  { name:'Screed',          url:`${BASE}/Screed.glb`,                               pri:0 },
+  { name:'ScreedRH',        url:`${BASE}/ScreedRH.glb`,                             pri:1 },
+  { name:'ScreedLH',        url:`${BASE}/ScreedLH.glb`,                             pri:1 },
+  { name:'Auger',           url:`${BASE}/Auger.glb`,                                pri:2 },
+  { name:'Seat & Cabin',    url:`${BASE}/${encodeURIComponent('Seat&Cabin.glb')}`,  pri:2 },
+  { name:'Tracktor',        url:`${BASE}/${encodeURIComponent('Tracktor C.glb')}`,  pri:3 },
+  { name:'TowArm',          url:`${BASE}/TowArm.glb`,                               pri:3 },
+  { name:'HopperSimulated', url:`${BASE}/HopperSimulated.glb`,                      pri:4 },
+];
 
-        // Handle local file selection / loading
-        function loadModel(file) {
-            if (file && file.name.endsWith('.glb')) {
-                const objectURL = URL.createObjectURL(file);
-                
-                // Reset animation UI state before loading new file
-                animationSection.style.display = 'none';
-                animSelector.innerHTML = '';
-                animPlayToggle.checked = true;
+const IS_MOBILE   = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+/* Mobile: 1 at a time to cap peak RAM; desktop: 2 parallel */
+const CONCURRENCY = IS_MOBILE ? 1 : 2;
+const DRACO       = 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/';
 
-                viewer.src = objectURL;
-                viewer.style.display = 'block';
-                placeholderText.style.display = 'none';
-            } else {
-                alert("Please drop or select a valid file ending in .glb");
+/* ══════════════════════════════════════════════════════════════════
+   DOM
+══════════════════════════════════════════════════════════════════ */
+const mv      = document.getElementById('mv');
+const loader  = document.getElementById('loader');
+const ldSub   = document.getElementById('ld-sub');
+const ldPhase = document.getElementById('ld-phase');
+const panel   = document.getElementById('prog-panel');
+const spdEl   = document.getElementById('spd');
+const sDot    = document.getElementById('s-dot');
+const sTxt    = document.getElementById('s-txt');
+const bRot    = document.getElementById('b-rot');
+const bSh     = document.getElementById('b-sh');
+const bEnv    = document.getElementById('b-env');
+const bPlay   = document.getElementById('b-play');
+const pi      = document.getElementById('pi');
+const cp      = document.getElementById('cp');
+const aDock   = document.getElementById('anim-dock');
+const bApl    = document.getElementById('b-apl');
+const bAsc    = document.getElementById('b-asc');
+const memPill = document.getElementById('mem-pill');
+const mbF     = document.getElementById('mb-f');
+const mbPct   = document.getElementById('mb-pct');
+
+/* ══════════════════════════════════════════════════════════════════
+   PROGRESS BAR BUILDER
+══════════════════════════════════════════════════════════════════ */
+const fills = [], names = [], sizes = [];
+function buildBars() {
+  panel.innerHTML = '';
+  const f = document.createDocumentFragment();
+  ASSETS.forEach((a, i) => {
+    const row = document.createElement('div'); row.className = 'a-row';
+    const nm  = document.createElement('div'); nm.className  = 'a-name'; nm.textContent = a.name;
+    const sz  = document.createElement('div'); sz.className  = 'a-size';
+    const tr  = document.createElement('div'); tr.className  = 'bar-t';
+    const fl  = document.createElement('div'); fl.className  = `bar-f ${i===0?'pri':'sec'}`;
+    tr.appendChild(fl); row.append(nm, sz, tr); f.appendChild(row);
+    fills.push(fl); names.push(nm); sizes.push(sz);
+  });
+  panel.appendChild(f);
+}
+function updBar(i, a, p) {
+  fills[i].style.width = p.pct + '%';
+  names[i].textContent = a.name;
+  sizes[i].textContent = p.label;
+  fills[i].classList.remove('sec'); fills[i].classList.add('pri');
+  if (p.spd) spdEl.textContent = p.spd;
+}
+function doneBar(i, a) {
+  fills[i].style.width = '100%';
+  names[i].classList.add('ok');
+  sizes[i].textContent = '✓';
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MEMORY MONITOR
+══════════════════════════════════════════════════════════════════ */
+let memTid;
+function startMem() {
+  if (!performance.memory) return;
+  memPill.style.display = 'flex';
+  memTid = setInterval(() => {
+    const { usedJSHeapSize: u, jsHeapSizeLimit: l } = performance.memory;
+    const pct = Math.min(100, u / l * 100);
+    mbF.style.width      = pct + '%';
+    mbF.style.background = pct > 80 ? '#ef4444' : pct > 60 ? '#f59e0b' : '#22c55e';
+    mbPct.textContent    = pct.toFixed(0) + '%';
+  }, 3500);
+}
+function stopMem() { clearInterval(memTid); }
+
+/* ══════════════════════════════════════════════════════════════════
+   FORMAT HELPERS
+══════════════════════════════════════════════════════════════════ */
+const fmtB = b => b < 1048576 ? `${(b/1024).toFixed(1)}KB` : `${(b/1048576).toFixed(2)}MB`;
+const fmtS = b => b < 1048576 ? `${(b/1024).toFixed(1)}KB/s` : `${(b/1048576).toFixed(2)}MB/s`;
+
+/* ══════════════════════════════════════════════════════════════════
+   STREAM ONE FILE  — ReadableStream, no full-buffer pre-collect
+   Returns: ArrayBuffer (merged from chunks only at the end)
+══════════════════════════════════════════════════════════════════ */
+async function fetchAsset(asset, idx) {
+  const res = await fetch(asset.url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const tot   = parseInt(res.headers.get('content-length') || '0', 10);
+  const hasL  = tot > 0;
+  const reader = res.body.getReader();
+  const chunks = [];
+  let recv = 0, tL = performance.now(), bL = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    recv += value.byteLength;
+
+    const now = performance.now(), dt = (now - tL) / 1000;
+    if (dt >= 0.25) {
+      const bps = (recv - bL) / dt; tL = now; bL = recv;
+      const pct = hasL ? recv / tot * 100 : Math.min(90, recv / 1048576 * 8);
+      updBar(idx, asset, {
+        pct,
+        label: fmtB(recv) + (hasL ? ` / ${fmtB(tot)}` : ''),
+        spd:   fmtS(bps),
+      });
+    }
+  }
+
+  /* Merge chunks NOW — this is the only moment the full file is in RAM.
+     We immediately hand it to gltfLoader.parse() then null it. */
+  const merged = new Uint8Array(recv);
+  let off = 0;
+  for (const c of chunks) { merged.set(c, off); off += c.byteLength; }
+  chunks.length = 0;           // release chunk references
+  doneBar(idx, asset);
+  return merged.buffer;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   DISPOSAL HELPERS
+══════════════════════════════════════════════════════════════════ */
+const TEX = ['map','normalMap','roughnessMap','metalnessMap','emissiveMap',
+             'aoMap','lightMap','bumpMap','displacementMap','alphaMap','envMap'];
+function disposeMat(m) { TEX.forEach(s => m[s]?.dispose()); m.dispose(); }
+function disposeNode(root) {
+  root.traverse(n => {
+    if (!n.isMesh) return;
+    n.geometry?.dispose();
+    Array.isArray(n.material) ? n.material.forEach(disposeMat) : disposeMat(n.material);
+  });
+  root.clear?.();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   HOTSPOT STATE
+══════════════════════════════════════════════════════════════════ */
+const hotspots  = {};   // partName → { clip, el }
+const pausedAt  = {};   // clipName → time
+const centroids = {};   // partName → THREE.Vector3
+
+function buildHotspots(clips) {
+  mv.querySelectorAll('.hs').forEach(e => e.remove());
+  Object.keys(hotspots).forEach(k => delete hotspots[k]);
+  const seen = {};
+  clips.forEach(clip => {
+    const m = clip.match(/\(([^)]+)\)$/);
+    const part = m ? m[1] : clip;
+    if (seen[part]) return; seen[part] = true;
+    const btn = document.createElement('button');
+    btn.className = 'hs';
+    btn.slot = `hotspot-${part.replace(/\s+/g,'-')}`;
+    const c = centroids[part];
+    if (c) { btn.dataset.position = `${c.x} ${c.y} ${c.z}`; btn.dataset.normal = '0 1 0'; }
+    btn.innerHTML = `<span class="hs-r">▶</span><span>${part}</span>`;
+    btn.addEventListener('click', () => onHS(btn, clip));
+    mv.appendChild(btn);
+    hotspots[part] = { clip, el: btn };
+  });
+}
+function clearHS() {
+  Object.values(hotspots).forEach(({ el }) => {
+    el.classList.remove('on'); el.querySelector('.hs-r').textContent = '▶';
+  });
+}
+function setHS(clip) {
+  Object.values(hotspots).forEach(({ clip: c, el }) => {
+    const a = c === clip;
+    el.classList.toggle('on', a);
+    el.querySelector('.hs-r').textContent = a ? '⏸' : '▶';
+  });
+}
+async function playClip(clip) {
+  if (mv.animationName) pausedAt[mv.animationName] = mv.currentTime;
+  mv.pause();
+  mv.animationName = clip;
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  mv.currentTime = pausedAt[clip] ?? 0;
+  mv.play(); setHS(clip); syncPlay(true); cp.value = clip;
+}
+function onHS(btn, clip) {
+  if (mv.animationName === clip && !mv.paused) {
+    pausedAt[clip] = mv.currentTime; mv.pause(); clearHS(); syncPlay(false);
+  } else { playClip(clip); }
+}
+function syncPlay(playing) {
+  bPlay.classList.toggle('on', playing);
+  pi.textContent = playing ? '⏸' : '▶';
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TOOLBAR WIRING
+══════════════════════════════════════════════════════════════════ */
+bRot.addEventListener('click', () => {
+  const on = bRot.classList.toggle('on');
+  on ? (mv.setAttribute('auto-rotate',''), mv.setAttribute('rotation-per-second','22deg'))
+     : mv.removeAttribute('auto-rotate');
+});
+bSh.addEventListener('click', () => {
+  const on = bSh.classList.toggle('on');
+  mv.setAttribute('shadow-intensity', on ? '0.2' : '0');
+});
+bEnv.addEventListener('click', () => {
+  const on = bEnv.classList.toggle('on');
+  mv.setAttribute('exposure', on ? '1.4' : '1.05');
+  mv.setAttribute('environment-image', on ? 'legacy' : 'neutral');
+});
+bPlay.addEventListener('click', () => {
+  if (!mv.paused) { pausedAt[mv.animationName]=mv.currentTime; mv.pause(); clearHS(); syncPlay(false); }
+  else            { mv.play(); setHS(mv.animationName); syncPlay(true); }
+});
+cp.addEventListener('change', e => playClip(e.target.value));
+bApl.addEventListener('click', () => {
+  const floor = mv.getAttribute('ar-placement') === 'floor';
+  mv.setAttribute('ar-placement', floor ? 'wall' : 'floor');
+  bApl.querySelector('.ic').textContent = floor ? '🪟' : '⬛';
+  bApl.querySelector('.tb-lbl').textContent = floor ? 'Wall' : 'Floor';
+  bApl.classList.toggle('on', !floor);
+});
+bAsc.addEventListener('click', () => {
+  const sc = mv.getAttribute('ar-scale') === 'auto';
+  mv.setAttribute('ar-scale', sc ? 'fixed' : 'auto');
+  bAsc.querySelector('.ic').textContent = sc ? '🔒' : '⤢';
+  bAsc.querySelector('.tb-lbl').textContent = sc ? 'Fixed' : 'Scale';
+  bAsc.classList.toggle('on', sc);
+});
+mv.addEventListener('ar-status', e => {
+  if (e.detail.status === 'session-started') mv.removeAttribute('auto-rotate');
+});
+
+/* ══════════════════════════════════════════════════════════════════
+   MODEL-VIEWER LOAD → animation UI
+══════════════════════════════════════════════════════════════════ */
+mv.addEventListener('load', () => {
+  const clips = mv.availableAnimations ?? [];
+  if (!clips.length) return;
+  cp.innerHTML = '';
+  clips.forEach(n => { const o = document.createElement('option'); o.value=n; o.textContent=n; cp.appendChild(o); });
+  aDock.style.display = 'flex';
+  mv.animationName = clips[0];
+  mv.pause();
+  buildHotspots(clips);
+});
+
+/* ══════════════════════════════════════════════════════════════════
+   THREE.JS LOADERS
+══════════════════════════════════════════════════════════════════ */
+const draco = new DRACOLoader(); draco.setDecoderPath(DRACO);
+const gltf  = new GLTFLoader();  gltf.setDRACOLoader(draco);
+
+/* ══════════════════════════════════════════════════════════════════
+   ★ MOBILE-SAFE PIPELINE ★
+
+   KEY CHANGES vs. previous version:
+   1. Assets are fetched + parsed ONE AT A TIME (CONCURRENCY=1 on mobile)
+      → peak RAM = one GLB buffer + parsed scene, not all 8 at once
+   2. Raw ArrayBuffer is nulled immediately after GLTFLoader.parse()
+   3. THREE.Cache is cleared after every parse to drop internal copies
+   4. GLTFExporter re-pack is done ONLY ONCE at the very end, then
+      masterRoot is disposed before the blob is created
+   5. Blob URL is revoked as soon as model-viewer fires 'load'
+   6. Shadows start OFF and are restored after the viewer is ready
+══════════════════════════════════════════════════════════════════ */
+let blobURL = null;
+
+async function run() {
+  buildBars();
+  startMem();
+
+  const master   = new THREE.Object3D();
+  const allAnims = [];
+
+  /* ── Process assets one (mobile) or two (desktop) at a time ── */
+  const queue = [...ASSETS].sort((a,b) => a.pri - b.pri);
+  let active = 0, idx = 0;
+
+  await new Promise(resolve => {
+    function next() {
+      if (idx >= queue.length && active === 0) { resolve(); return; }
+      while (active < CONCURRENCY && idx < queue.length) {
+        const asset   = queue[idx];
+        const barIdx  = ASSETS.indexOf(asset);
+        idx++; active++;
+
+        ldPhase.textContent = `Fetching ${asset.name}…`;
+
+        fetchAsset(asset, barIdx)
+          .then(async buf => {
+            /* ── Parse immediately, release raw buffer right after ── */
+            ldPhase.textContent = `Parsing ${asset.name}…`;
+            const result = await new Promise((rs, rj) => gltf.parse(buf, '', rs, rj));
+
+            /* CRITICAL: null the raw buffer so GC can reclaim it before
+               we start on the next file */
+            buf = null;
+
+            result.scene?.traverse(n => {
+              if (!n.isMesh) return;
+              n.castShadow = n.receiveShadow = true;
+              n.matrixAutoUpdate = false;
+            });
+            if (result.scene) {
+              master.add(result.scene);
+              const box = new THREE.Box3().setFromObject(result.scene);
+              if (!box.isEmpty())
+                centroids[asset.name] = box.getCenter(new THREE.Vector3());
             }
-        }
+            result.animations?.forEach(clip => {
+              clip.name = clip.name
+                ? `${clip.name} (${asset.name})`
+                : `Anim (${asset.name})`;
+              allAnims.push(clip);
+            });
 
-        // Listen for when the 3D model is fully loaded to fetch animation tracks
-        viewer.addEventListener('load', () => {
-            const availableAnimations = viewer.availableAnimations;
-            
-            if (availableAnimations && availableAnimations.length > 0) {
-                availableAnimations.forEach((animName) => {
-                    const option = document.createElement('option');
-                    option.value = animName;
-                    option.textContent = animName;
-                    animSelector.appendChild(option);
-                });
+            /* Drop Three.js internal cache copies after each file */
+            THREE.Cache.clear();
+          })
+          .catch(err => console.error(`[stream] ${asset.name}:`, err))
+          .finally(() => { active--; next(); });
+      }
+    }
+    next();
+  });
 
-                viewer.animationName = availableAnimations[0];
-                viewer.play();
-                animationSection.style.display = 'flex';
-            }
-        });
+  /* ── Export merged scene ─────────────────────────────────────── */
+  ldPhase.textContent = '';
+  ldSub.textContent   = 'Building merged scene…';
 
-        fileInput.addEventListener('change', (e) => loadModel(e.target.files[0]));
+  const exp = new GLTFExporter();
+  const glbBuf = await new Promise((res, rej) =>
+    exp.parse(master, res, rej, { binary: true, animations: allAnims })
+  );
 
-        // Drag & Drop event handling
-        dropZone.addEventListener('dragover', (e) => e.preventDefault());
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            if (e.dataTransfer.files.length > 0) {
-                loadModel(e.dataTransfer.files[0]);
-            }
-        });
+  /* Dispose Three.js scene BEFORE creating the blob — frees JS heap
+     before model-viewer allocates its own copy on the GPU side */
+  disposeNode(master);
+  THREE.Cache.clear();
 
-        // --- Core Functionality Toggles ---
-        
-        // 1. Turntable Feature
-        turntableToggle.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                viewer.setAttribute('auto-rotate', '');
-                viewer.setAttribute('rotation-per-second', '30deg');
-            } else {
-                viewer.removeAttribute('auto-rotate');
-            }
-        });
+  /* Optional: yield to GC before blob creation */
+  await new Promise(r => setTimeout(r, 80));
 
-        // 2. Shadows Feature
-        shadowToggle.addEventListener('change', (e) => {
-            viewer.setAttribute('shadow-intensity', e.target.checked ? "1" : "0");
-        });
+  if (blobURL) URL.revokeObjectURL(blobURL);
+  blobURL = URL.createObjectURL(new Blob([glbBuf], { type: 'model/gltf-binary' }));
+  mv.src = blobURL;
 
-        // 3. Play / Pause Animation
-        animPlayToggle.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                viewer.play();
-            } else {
-                viewer.pause();
-            }
-        });
+  mv.addEventListener('load', () => {
+    /* Free blob URL once GPU has the data */
+    if (blobURL) { URL.revokeObjectURL(blobURL); blobURL = null; }
+    /* Restore shadows after scene is on GPU */
+    if (!IS_MOBILE) mv.setAttribute('shadow-intensity', '0.2');
+    stopMem();
+  }, { once: true });
 
-        // 4. Switch Active Animation Clip
-        animSelector.addEventListener('change', (e) => {
-            viewer.animationName = e.target.value;
-            if (animPlayToggle.checked) {
-                viewer.play();
-            }
-        });
-    </script>
+  /* ── Reveal viewer ───────────────────────────────────────────── */
+  loader.classList.add('gone');
+  mv.classList.add('vis');
+  sDot.className = 's-dot ok';
+  sTxt.textContent = 'Ready';
+}
+
+run().catch(err => {
+  console.error('[pipeline]', err);
+  sDot.className  = 's-dot err';
+  sTxt.textContent = 'Error';
+  ldSub.textContent  = 'Failed to load. Check console.';
+  ldPhase.textContent = err.message;
+});
+</script>
 </body>
 </html>
